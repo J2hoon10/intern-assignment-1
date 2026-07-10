@@ -1,0 +1,55 @@
+# Single-stage LoRA fine-tuning: phase1 (PQA-A pretraining) is SKIPPED entirely.
+# Trains a FRESH LoRA adapter directly on PQA-L fold0 only -- no PQA-A transfer.
+# Same LoRA config as lora_mp_qko.yaml (r=8, alpha=16, dropout=0.05,
+# target_modules=[q_proj, k_proj, o_proj]); only the `phases` list differs
+# (phase1 entry removed, phase2 kept as cv_folds: 1 = fold0 only).
+# Runs via train_multiphase.py: with no phase1 having set prev_art, phase2's
+# init_from is None, so load_phase_model() takes the "lora fresh adapter"
+# branch (apply_lora on the base model) instead of continuing a prior adapter.
+# Separate experiment name -> outputs/lora_qko_p2only, untouched by lora_mp_qko.
+experiment: lora_qko_p2only
+method: lora
+model_name: Qwen/Qwen2.5-0.5B
+max_seq_len: 1024
+seed: 42
+
+lora:
+  r: 8
+  alpha: 16
+  dropout: 0.05
+  target_modules: [q_proj, k_proj, o_proj]
+  # Attention Query/Key/Output only -- no Value (v_proj), no MLP (gate/up/down_proj)
+
+train_common:
+  per_device_train_batch_size: 2
+  per_device_eval_batch_size: 4
+  gradient_accumulation_steps: 8        # effective batch = 16
+  gradient_checkpointing: true
+  warmup_ratio: 0.03
+  weight_decay: 0.0
+  lr_scheduler_type: cosine
+  logging_steps: 20
+  eval_steps: 200
+  save_steps: 200
+  save_total_limit: 2
+  empty_cache_every_steps: 50          # release the allocator's cached segments every N steps...
+  empty_cache_min_reserved_gb: 12       # ...but only while reserved > this. Shape churn grows the
+                                        # cache past VRAM into sysmem (RAM) and nothing else ever
+                                        # frees it: PYTORCH_CUDA_ALLOC_CONF's gc threshold is a
+                                        # no-op without set_per_process_memory_fraction.
+
+phases:
+  - name: phase2                        # fold0 only on PQA-L (learns maybe); fresh adapter, no phase1
+    cv_folds: 1
+    fold_train_pattern: data/mp/pqal_fold{k}/train.jsonl
+    fold_val_pattern: data/mp/pqal_fold{k}/val.jsonl
+    learning_rate: 1.0e-4
+    num_train_epochs: 4
+    per_device_train_batch_size: 1        # 16GB: micro-batch 1 avoids fragmentation OOM
+    gradient_accumulation_steps: 16       # effective batch = 1 * 16 = 16
+    eval_steps: 50                        # eval/save every 50 steps (save_steps must match eval_steps)
+    save_steps: 50
+    save_total_limit: 1
+
+eval:
+  batch_size: 8

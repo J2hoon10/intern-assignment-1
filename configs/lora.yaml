@@ -1,0 +1,36 @@
+# LoRA fine-tuning — only adapter parameters trainable.
+experiment: lora
+method: lora                     # base | full_ft | lora
+model_name: Qwen/Qwen2.5-0.5B
+max_seq_len: 1024
+seed: 42
+
+lora:
+  r: 16
+  alpha: 32
+  dropout: 0.05
+  target_modules: [q_proj, k_proj, v_proj, o_proj, gate_proj, up_proj, down_proj]
+  # Attention: q/k/v/o_proj = Query/Key/Value/Output projections
+  # MLP (FFN):  gate/up/down_proj = SwiGLU gate / up / down projections
+  # -> full LoRA: every attention + MLP projection in each transformer block
+
+# Tuned for 16 GB VRAM: effective batch = 4*4 = 16, gradient checkpointing + bf16 AMP.
+# (LoRA has tiny optimizer state, but the logits tensor is still large, so keep the
+#  micro-batch small for headroom.)
+train:
+  learning_rate: 2.0e-4
+  num_train_epochs: 3
+  per_device_train_batch_size: 4
+  per_device_eval_batch_size: 4
+  gradient_accumulation_steps: 4        # effective batch = 4 * 4 = 16
+  gradient_checkpointing: true          # needs enable_input_require_grads() for PEFT (handled in train.py)
+  warmup_ratio: 0.03
+  weight_decay: 0.0
+  lr_scheduler_type: cosine
+  logging_steps: 20
+  eval_steps: 200
+  save_steps: 200
+  save_total_limit: 3
+
+eval:
+  batch_size: 8

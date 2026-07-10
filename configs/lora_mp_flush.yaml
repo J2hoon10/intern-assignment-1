@@ -1,0 +1,68 @@
+# Two-phase LoRA fine-tuning, identical to lora_multiphase.yaml (lora_mp) EXCEPT
+# the CUDA cache-flush settings: check every step and flush at 14GB reserved
+# instead of every 50 steps / 12GB. Purpose: measure whether the tighter flush
+# schedule changes training speed vs the original lora_mp run. Separate
+# experiment name -> writes only to outputs/lora_mp_flush, lora_mp untouched.
+#
+# Phase 1 (PQA-A, yes/no) -> Phase 2 (PQA-L 450, yes/no/maybe; learns "maybe").
+# The SAME LoRA adapter is carried across phases (Phase 2 continues training it).
+# Memory: 16 GB-safe (batch 2 + grad checkpointing). Activation memory (forward
+# state kept for backward through all 24 frozen layers) is what's tight on this
+# card, not optimizer/grad state -- LoRA's tiny trainable-param count doesn't
+# shrink that, so checkpointing must stay on here (same as full_ft).
+experiment: lora_mp_flush
+method: lora
+model_name: Qwen/Qwen2.5-0.5B
+max_seq_len: 1024
+seed: 42
+
+lora:
+  r: 16
+  alpha: 32
+  dropout: 0.05
+  target_modules: [q_proj, k_proj, v_proj, o_proj, gate_proj, up_proj, down_proj]
+  # Attention: q/k/v/o_proj = Query/Key/Value/Output projections
+  # MLP (FFN):  gate/up/down_proj = SwiGLU gate / up / down projections
+  # -> full LoRA: every attention + MLP projection in each transformer block
+
+train_common:
+  per_device_train_batch_size: 2
+  per_device_eval_batch_size: 4
+  gradient_accumulation_steps: 8        # effective batch = 16
+  gradient_checkpointing: true
+  warmup_ratio: 0.03
+  weight_decay: 0.0
+  lr_scheduler_type: cosine
+  logging_steps: 20
+  eval_steps: 200
+  save_steps: 200
+  save_total_limit: 2
+  empty_cache_every_steps: 1            # check every step (checking is free -- memory_reserved()
+                                        # is already queried every step regardless); actual
+                                        # empty_cache() only fires when reserved crosses the
+                                        # watermark below, so this just catches the crossing sooner.
+  empty_cache_min_reserved_gb: 14       # ...but only while reserved > this. Shape churn grows the
+                                        # cache past VRAM into sysmem (RAM) and nothing else ever
+                                        # frees it: PYTORCH_CUDA_ALLOC_CONF's gc threshold is a
+                                        # no-op without set_per_process_memory_fraction.
+
+phases:
+  - name: phase1                        # large-scale training on PQA-A (yes/no)
+    train_file: data/mp/pqaa.jsonl
+    dev_file: data/mp/pqaa_dev.jsonl     # PQA-A held-out dev (independent of PQA-L folds)
+    learning_rate: 2.0e-4
+    num_train_epochs: 1
+  - name: phase2                        # 10-fold CV on PQA-L (learns maybe); best fold -> test
+    cv_folds: 10
+    fold_train_pattern: data/mp/pqal_fold{k}/train.jsonl
+    fold_val_pattern: data/mp/pqal_fold{k}/val.jsonl
+    learning_rate: 1.0e-4
+    num_train_epochs: 4
+    per_device_train_batch_size: 1        # 16GB: micro-batch 1 avoids fragmentation OOM
+    gradient_accumulation_steps: 16       # effective batch = 1 * 16 = 16 (same as phase1)
+    eval_steps: 50                        # eval/save every 50 steps (save_steps must match eval_steps)
+    save_steps: 50
+    save_total_limit: 1
+
+eval:
+  batch_size: 8

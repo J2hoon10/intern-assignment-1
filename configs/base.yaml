@@ -1,0 +1,9 @@
+# Base (pretrained, zero-shot) — evaluation only, no training.
+experiment: base
+method: base                     # base | full_ft | lora
+model_name: Qwen/Qwen2.5-0.5B
+max_seq_len: 1024
+seed: 42
+
+eval:
+  batch_size: 16

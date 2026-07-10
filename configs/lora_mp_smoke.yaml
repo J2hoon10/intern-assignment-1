@@ -1,0 +1,37 @@
+# Smoke-test config: mirrors lora_mp phase1's memory-relevant settings (LoRA
+# hyperparams, max_seq_len, batch/grad-accum) to check VRAM usage without
+# running a full phase. Separate experiment name -> writes only to
+# outputs/lora_mp_smoke, never touches outputs/lora_mp.
+# gradient_checkpointing here reproduces the setting under test (edit before running).
+experiment: lora_mp_smoke
+method: lora
+model_name: Qwen/Qwen2.5-0.5B
+max_seq_len: 1024
+seed: 42
+
+lora:
+  r: 16
+  alpha: 32
+  dropout: 0.05
+  target_modules: [q_proj, k_proj, v_proj, o_proj, gate_proj, up_proj, down_proj]
+  # Attention: q/k/v/o_proj = Query/Key/Value/Output projections
+  # MLP (FFN):  gate/up/down_proj = SwiGLU gate / up / down projections
+  # -> full LoRA: every attention + MLP projection in each transformer block
+
+train:
+  learning_rate: 2.0e-4
+  num_train_epochs: 1
+  per_device_train_batch_size: 2
+  per_device_eval_batch_size: 4
+  gradient_accumulation_steps: 8         # effective batch = 2 * 8 = 16 (matches lora_mp phase1)
+  gradient_checkpointing: true
+  warmup_ratio: 0.03
+  weight_decay: 0.0
+  lr_scheduler_type: cosine
+  logging_steps: 5
+  eval_steps: 200                        # set high so eval doesn't fire during the short smoke run
+  save_steps: 200
+  save_total_limit: 1
+
+eval:
+  batch_size: 8

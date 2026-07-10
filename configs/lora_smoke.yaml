@@ -1,0 +1,31 @@
+# Smoke-test config: tiny run to verify the pipeline (train + eval + resume) end-to-end.
+# Use with: python src/train.py --config configs/lora_smoke.yaml --max_train_samples 100 --max_steps 20
+experiment: lora_smoke
+method: lora
+model_name: Qwen/Qwen2.5-0.5B
+max_seq_len: 512
+seed: 42
+
+lora:
+  r: 8
+  alpha: 16
+  dropout: 0.05
+  target_modules: [q_proj, k_proj, v_proj, o_proj]
+  # Attention only: Query/Key/Value/Output projections (no MLP: gate/up/down_proj)
+
+train:
+  learning_rate: 2.0e-4
+  num_train_epochs: 1
+  per_device_train_batch_size: 4
+  per_device_eval_batch_size: 4
+  gradient_accumulation_steps: 1
+  warmup_ratio: 0.0
+  weight_decay: 0.0
+  lr_scheduler_type: constant
+  logging_steps: 2
+  eval_steps: 10
+  save_steps: 10
+  save_total_limit: 2
+
+eval:
+  batch_size: 16

@@ -1,0 +1,42 @@
+# Tiny single-phase test to validate CudaMemoryProbeCallback (per-step reserved
+# delta + batch-shape logging) without touching the real lora_mp experiment.
+# Isolated experiment name -> writes only to outputs/lora_mp_probetest.
+# 400 train / 2 epochs = 50 optimizer steps: epoch 1 should show reserved growth
+# on first-seen shapes; epoch 2 should be silent (all shapes already cached).
+experiment: lora_mp_probetest
+method: lora
+model_name: Qwen/Qwen2.5-0.5B
+max_seq_len: 1024
+seed: 42
+
+lora:
+  r: 16
+  alpha: 32
+  dropout: 0.05
+  target_modules: [q_proj, k_proj, v_proj, o_proj, gate_proj, up_proj, down_proj]
+  # Attention: q/k/v/o_proj = Query/Key/Value/Output projections
+  # MLP (FFN):  gate/up/down_proj = SwiGLU gate / up / down projections
+  # -> full LoRA: every attention + MLP projection in each transformer block
+
+train_common:
+  per_device_train_batch_size: 2
+  per_device_eval_batch_size: 4
+  gradient_accumulation_steps: 8
+  gradient_checkpointing: true
+  warmup_ratio: 0.03
+  weight_decay: 0.0
+  lr_scheduler_type: cosine
+  logging_steps: 5
+  eval_steps: 200
+  save_steps: 200
+  save_total_limit: 1
+
+phases:
+  - name: phase1
+    train_file: C:/Users/myhom/AppData/Local/Temp/claude/c--Users-myhom-Jihoon-Transformer-Study-LoRA-exp/62b07cd7-76fc-4c57-a44d-1329b32cc0b4/scratchpad/pqaa_400.jsonl
+    dev_file: C:/Users/myhom/AppData/Local/Temp/claude/c--Users-myhom-Jihoon-Transformer-Study-LoRA-exp/62b07cd7-76fc-4c57-a44d-1329b32cc0b4/scratchpad/pqaa_dev_40.jsonl
+    learning_rate: 2.0e-4
+    num_train_epochs: 2
+
+eval:
+  batch_size: 8

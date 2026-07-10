@@ -1,0 +1,31 @@
+# Smoke-test config: mirrors full_ft_mp phase1's memory-relevant settings (batch/
+# grad-accum, gradient_checkpointing, weight_decay) to check VRAM usage without
+# running a full phase. Run via train.py (single-stage), NOT train_multiphase.py --
+# same convention as lora_mp_smoke.yaml. Separate experiment name -> writes only to
+# outputs/full_ft_mp_smoke, never touches outputs/full_ft_mp.
+#
+# Usage (100-step VRAM check):
+#   python src/train.py --config configs/full_ft_mp_smoke.yaml --max_train_samples 2000 --max_steps 100
+experiment: full_ft_mp_smoke
+method: full_ft
+model_name: Qwen/Qwen2.5-0.5B
+max_seq_len: 1024
+seed: 42
+
+train:
+  learning_rate: 1.0e-5
+  num_train_epochs: 1
+  per_device_train_batch_size: 2
+  per_device_eval_batch_size: 4
+  gradient_accumulation_steps: 8         # effective batch = 2 * 8 = 16 (matches full_ft_mp phase1)
+  gradient_checkpointing: true
+  warmup_ratio: 0.03
+  weight_decay: 0.01
+  lr_scheduler_type: cosine
+  logging_steps: 10
+  eval_steps: 200                        # set high so eval doesn't fire during the short smoke run
+  save_steps: 200
+  save_total_limit: 1
+
+eval:
+  batch_size: 8

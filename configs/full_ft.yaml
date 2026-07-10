@@ -1,0 +1,27 @@
+# Full fine-tuning — all parameters trainable.
+# Tuned for 16 GB VRAM: small micro-batch + grad-accum (effective batch = 4*4 = 16),
+# gradient checkpointing + bf16 AMP. The large vocab (151,936) makes the logits
+# tensor (batch*seq*vocab) the dominant memory cost, so the micro-batch is kept small.
+experiment: full_ft
+method: full_ft                  # base | full_ft | lora
+model_name: Qwen/Qwen2.5-0.5B
+max_seq_len: 1024
+seed: 42
+
+train:
+  learning_rate: 1.0e-5
+  num_train_epochs: 2
+  per_device_train_batch_size: 2
+  per_device_eval_batch_size: 4
+  gradient_accumulation_steps: 8        # effective batch = 2 * 8 = 16
+  gradient_checkpointing: true          # trades compute for much lower activation memory
+  warmup_ratio: 0.03
+  weight_decay: 0.01
+  lr_scheduler_type: cosine
+  logging_steps: 20
+  eval_steps: 200
+  save_steps: 200
+  save_total_limit: 3
+
+eval:
+  batch_size: 8
