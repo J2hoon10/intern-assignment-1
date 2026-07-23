@@ -1,17 +1,17 @@
-"""Prepare datasets for two-phase training with 10-fold CV on PQA-L.
+"""PQA-L 10-fold CV를 포함한 2단계 학습용 데이터셋을 준비한다.
 
-Phase 1 trains on PQA-A; Phase 2 fine-tunes on PQA-L via 10-fold cross-validation
-(the official PubMedQA protocol). The best fold (by validation) is then tested.
+Phase 1은 PQA-A로 학습하고, Phase 2는 (공식 PubMedQA 프로토콜인) 10-fold
+교차검증으로 PQA-L을 fine-tune한다. 검증 결과가 가장 좋은 fold를 테스트한다.
 
-Produces:
-  data/test.jsonl                     official 500-instance test set (canonical)
+생성물:
+  data/test.jsonl                     공식 500개 test 셋 (정규)
   data/mp/pqaa.jsonl                  PQA-A train subset          (Phase 1)
-  data/mp/pqaa_dev.jsonl              PQA-A held-out dev           (Phase 1 validation)
+  data/mp/pqaa_dev.jsonl              PQA-A held-out dev           (Phase 1 검증)
   data/mp/pqal_fold{k}/train.jsonl    450 train  (k = 0..n_folds-1)  (Phase 2)
   data/mp/pqal_fold{k}/val.jsonl      50  val    (k = 0..n_folds-1)  (Phase 2)
 
-Leakage guarantees (fail-fast): every PQA-A/PQA-L row has the 500 test pubids
-removed; within each fold train ∩ val == 0; and (train ∪ val) ∩ test == 0.
+누수 보장(fail-fast): 모든 PQA-A/PQA-L row에서 500개 test pubid를 제거하고;
+각 fold 내에서 train ∩ val == 0; (train ∪ val) ∩ test == 0.
 """
 import argparse
 import os
@@ -46,12 +46,12 @@ def main():
     logger.info("=== prepare_data_multiphase (PQA-A -> PQA-L %d-fold) | pqaa=%d ===",
                 args.n_folds, args.pqaa_size)
 
-    # 1) Canonical test set.
+    # 1) 정규 test 셋.
     test_rows, test_pubids = build_test_set(logger)
     write_jsonl(test_rows, os.path.join(DATA_DIR, "test.jsonl"))
 
-    # 2) Phase 1: PQA-A train + a held-out PQA-A dev (keeps Phase-1 model
-    #    selection independent of the PQA-L folds).
+    # 2) Phase 1: PQA-A train + held-out PQA-A dev (Phase-1 모델 선택을
+    #    PQA-L fold와 독립적으로 유지하기 위함).
     pqaa_all = build_pqaa_subset(test_pubids, args.pqaa_size + args.pqaa_dev_size, args.seed, logger)
     pqaa_train = pqaa_all[: args.pqaa_size]
     pqaa_dev = pqaa_all[args.pqaa_size:]
@@ -60,7 +60,7 @@ def main():
     write_jsonl(pqaa_train, os.path.join(MP_DIR, "pqaa.jsonl"))
     write_jsonl(pqaa_dev, os.path.join(MP_DIR, "pqaa_dev.jsonl"))
 
-    # 3) Phase 2: PQA-L CV 500 -> stratified n-fold (each 450 train / 50 val).
+    # 3) Phase 2: PQA-L CV 500 -> 층화 n-fold (각 450 train / 50 val).
     cv_rows = build_labeled_cv(test_pubids, logger)
     assert_no_test_overlap(cv_rows, test_pubids, "PQA-L CV", logger)
     skf = StratifiedKFold(n_splits=args.n_folds, shuffle=True, random_state=args.seed)

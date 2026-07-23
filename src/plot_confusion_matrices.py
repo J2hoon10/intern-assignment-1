@@ -1,11 +1,11 @@
-"""Plot confusion-matrix heatmaps from saved eval metrics.
+"""저장된 평가 지표로 confusion matrix 히트맵을 그린다.
 
-Purpose: visually compare per-class error patterns across experiments.
-Reads outputs/<exp>/metrics.json (written by evaluate.py) and saves a single
-combined heatmap figure to outputs/confusion_matrices/confusion_matrices.png.
-Each panel shows raw prediction counts (sklearn/seaborn confusion-matrix
-style); pass --normalize true/pred to shade by row/column percentage instead
-(cell labels still show the raw count).
+목적: 실험 간 클래스별 오류 패턴을 시각적으로 비교한다.
+(evaluate.py가 작성한) outputs/<exp>/metrics.json을 읽어서 하나로 합쳐진
+히트맵 그림을 outputs/confusion_matrices/confusion_matrices.png에 저장한다.
+각 패널은 (sklearn/seaborn confusion-matrix 스타일로) 예측 원본 개수를
+보여준다; --normalize true/pred를 넘기면 대신 행/열 백분율로 음영을 넣는다
+(셀 라벨은 여전히 원본 개수를 표시).
 """
 import argparse
 import json
@@ -29,7 +29,7 @@ CMAP = "Blues"
 
 
 def load_metrics(exp):
-    """Return the metrics.json dict for an experiment, or None if missing."""
+    """실험의 metrics.json dict를 반환한다. 없으면 None."""
     path = os.path.join(OUTPUTS_DIR, exp, "metrics.json")
     if not os.path.isfile(path):
         print(f"[skip] no metrics.json found for '{exp}' at {path}")
@@ -39,7 +39,7 @@ def load_metrics(exp):
 
 
 def normalize_matrix(mat, mode="true"):
-    """Row-normalize (mode='true') so each true label's row sums to 1.0."""
+    """행 정규화(mode='true')하여 각 true 라벨 행의 합이 1.0이 되도록 한다."""
     mat = mat.astype(float)
     if mode == "true":
         sums = mat.sum(axis=1, keepdims=True)
@@ -52,7 +52,7 @@ def normalize_matrix(mat, mode="true"):
 
 
 def plot_confusion_matrices(experiments, normalize="true", out_name="confusion_matrices.png"):
-    """experiments: list of (exp_dir_name, display_title) tuples."""
+    """experiments: (exp_dir_name, display_title) 튜플의 리스트."""
     datasets = []
     for exp, title in experiments:
         m = load_metrics(exp)

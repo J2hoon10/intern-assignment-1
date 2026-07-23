@@ -1,8 +1,8 @@
-"""Plot training/eval loss curves from saved training logs.
+"""저장된 학습 로그로 학습/검증 loss 곡선을 그린다.
 
-Purpose: verify that the loss decreases properly during training.
-Reads outputs/<exp>/trainer_state.json (falls back to train_log.jsonl) and
-saves outputs/<exp>/loss_curve.png. Metrics/params are NOT plotted here.
+목적: 학습 중 loss가 제대로 감소하는지 확인한다.
+outputs/<exp>/trainer_state.json을 읽고(없으면 train_log.jsonl로 대체) 결과를
+outputs/<exp>/loss_curve.png에 저장한다. 여기서는 지표/파라미터 수는 그리지 않는다.
 """
 import argparse
 import json
@@ -20,7 +20,7 @@ MULTIPHASE_EXPERIMENTS = ["full_ft_mp", "lora_mp"]
 
 
 def load_log_history(log_dir):
-    """Return the Trainer log_history list of records."""
+    """Trainer의 log_history 레코드 리스트를 반환한다."""
     state_path = os.path.join(log_dir, "trainer_state.json")
     if os.path.isfile(state_path):
         with open(state_path, encoding="utf-8") as f:
@@ -38,7 +38,7 @@ def load_log_history(log_dir):
 
 
 def best_cv_fold(exp):
-    """Return the best_fold index selected in outputs/<exp>/phase2/cv_selection.json."""
+    """outputs/<exp>/phase2/cv_selection.json에서 선택된 best_fold 인덱스를 반환한다."""
     sel_path = os.path.join(OUTPUTS_DIR, exp, "phase2", "cv_selection.json")
     if not os.path.isfile(sel_path):
         return None
@@ -106,7 +106,7 @@ def plot_experiment(exp, phase_subdir=None, out_name="loss_curve.png", title_suf
 
 
 def plot_selected_cv_fold(exp):
-    """Plot the training curve of the phase-2 CV fold selected as best in cv_selection.json."""
+    """cv_selection.json에서 best로 선택된 phase-2 CV fold의 학습 곡선을 그린다."""
     fold = best_cv_fold(exp)
     if fold is None:
         print(f"[skip] no phase2/cv_selection.json found for '{exp}'")

@@ -1,13 +1,13 @@
-"""Qualitative inference: run a trained model on a small handful of labeled
-examples and save side-by-side comparisons (input / prediction / gold label).
+"""정성적 추론: 라벨이 있는 소수의 예시에 대해 학습된 모델을 돌려 (입력 /
+예측 / 정답) 비교 결과를 나란히 저장한다.
 
-Unlike evaluate.py (which scores the full 500-example official test set for
-aggregate Accuracy/Macro-F1), this script is for eyeballing individual cases:
-it prints and saves, per example, the question, the model's prediction, the
-gold label, whether they match, and the per-label confidence (length-normalized
-log-prob from the same constrained yes/no/maybe scoring used in evaluate.py).
+evaluate.py(공식 500개 test 전체를 채점해 집계 Accuracy/Macro-F1을 구함)와
+달리, 이 스크립트는 개별 사례를 눈으로 확인하기 위한 것이다: 예시마다 질문,
+모델의 예측, 정답, 둘의 일치 여부, 그리고 (evaluate.py와 동일한 제약
+yes/no/maybe 스코어링에서 나온 길이정규화 로그확률인) 라벨별 신뢰도를
+출력하고 저장한다.
 
-Usage:
+사용법:
     python src/infer.py --config configs/lora.yaml
     python src/infer.py --config configs/lora.yaml --input data/infer_sample.jsonl
 """

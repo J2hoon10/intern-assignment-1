@@ -1,9 +1,9 @@
-"""Train Qwen2.5-0.5B on PubMedQA — full fine-tuning or LoRA.
+"""PubMedQA로 Qwen2.5-0.5B를 학습 — full fine-tuning 또는 LoRA.
 
-Features:
-  - trainable-parameter count logged + saved (param_count.json)
-  - training progress logged to logs/<exp>.log, trainer_state.json, train_log.jsonl
-  - automatic resume from the latest checkpoint (or --fresh to start over)
+기능:
+  - 학습 가능 파라미터 수를 로깅 + 저장 (param_count.json)
+  - 학습 진행 상황을 logs/<exp>.log, trainer_state.json, train_log.jsonl에 기록
+  - 최신 체크포인트에서 자동 재개 (또는 --fresh로 처음부터 시작)
 """
 import argparse
 import json
@@ -19,7 +19,7 @@ from model_utils import apply_lora, load_model, load_tokenizer, log_and_save_par
 
 
 class JsonlLoggingCallback(TrainerCallback):
-    """Append every Trainer log record (loss, lr, eval_loss, ...) to a JSONL file."""
+    """Trainer의 로그 레코드(loss, lr, eval_loss, ...)를 매번 JSONL 파일에 이어붙인다."""
 
     def __init__(self, path: str):
         self.path = path
@@ -38,7 +38,7 @@ def build_training_args(cfg, out_dir, logger):
     use_bf16 = dtype_name == "bf16"
     use_fp16 = dtype_name == "fp16"
     use_gc = bool(t.get("gradient_checkpointing", False))
-    use_tf32 = torch.cuda.is_available() and use_bf16  # bf16 support (Ampere+) implies TF32
+    use_tf32 = torch.cuda.is_available() and use_bf16  # bf16 지원(Ampere 이상)이면 TF32도 지원됨
     logger.info(
         "AMP/memory | dtype=%s (bf16=%s fp16=%s) | gradient_checkpointing=%s | tf32=%s | "
         "micro_bsz=%d grad_accum=%d (effective=%d)",
@@ -67,15 +67,15 @@ def build_training_args(cfg, out_dir, logger):
         load_best_model_at_end=True,
         metric_for_best_model="eval_loss",
         greater_is_better=False,
-        bf16=use_bf16,                      # bf16 AMP (autocast); fp32 master weights kept
+        bf16=use_bf16,                      # bf16 AMP (autocast); fp32 마스터 가중치는 유지
         fp16=use_fp16,
-        tf32=use_tf32,                      # faster matmuls on Ampere+/Ada
+        tf32=use_tf32,                      # Ampere+/Ada에서 matmul을 더 빠르게
         gradient_checkpointing=use_gc,
         gradient_checkpointing_kwargs={"use_reentrant": False},
-        group_by_length=True,               # cluster similar lengths -> far fewer distinct
-                                             # padded shapes -> avoids CUDA allocator
-                                             # fragmentation (see CausalCollator)
-        dataloader_num_workers=0,           # 0 is safest on Windows
+        group_by_length=True,               # 비슷한 길이끼리 묶음 -> 서로 다른 패딩
+                                             # shape 수가 훨씬 줄어듦 -> CUDA allocator
+                                             # 파편화 방지 (CausalCollator 참고)
+        dataloader_num_workers=0,           # Windows에서는 0이 가장 안전
         report_to=["tensorboard"],
         logging_dir=os.path.join(out_dir, "tb"),
         seed=cfg["seed"],
@@ -101,21 +101,21 @@ def main():
     logger.info("=== TRAIN %s (method=%s) ===", exp, method)
     logger.info("Config: %s", json.dumps(cfg, ensure_ascii=False))
 
-    # Model + tokenizer (fp32 weights; bf16 AMP handles mixed precision at run time).
+    # 모델 + 토크나이저 (fp32 가중치; 실행 시 혼합정밀도는 bf16 AMP가 처리).
     tokenizer = load_tokenizer(cfg["model_name"])
     model = load_model(cfg["model_name"], dtype=torch.float32)
     if method == "lora":
         model = apply_lora(model, cfg["lora"])
         model.print_trainable_parameters()
-    # Gradient checkpointing needs use_cache off; PEFT additionally needs input grads enabled
-    # so gradients can flow back to the adapters through the checkpointed graph.
+    # gradient checkpointing을 쓰려면 use_cache를 꺼야 하고, PEFT는 추가로 input grads를
+    # 활성화해야 checkpoint된 그래프를 통해 adapter까지 gradient가 흘러갈 수 있다.
     if bool(cfg["train"].get("gradient_checkpointing", False)):
         model.config.use_cache = False
         if method == "lora":
             model.enable_input_require_grads()
     log_and_save_param_count(model, out_dir, logger)
 
-    # Data.
+    # 데이터.
     train_rows = read_jsonl(os.path.join(DATA_DIR, "train.jsonl"))
     dev_rows = read_jsonl(os.path.join(DATA_DIR, "dev.jsonl"))
     if args.max_train_samples:
@@ -130,13 +130,12 @@ def main():
         training_args.max_steps = args.max_steps
         logger.info("Overriding max_steps=%d (smoke test).", args.max_steps)
 
-    # Re-seed right before the Trainer builds its DataLoader: model/adapter init
-    # consumes the global RNG by a method-dependent amount (LoRA's Kaiming-uniform
-    # adapter draws vs none for full_ft), and Trainer's plain RandomSampler seeds
-    # itself from torch's *current* global RNG state rather than the configured
-    # seed -- so without this reset, full_ft and lora would get different,
-    # uncontrolled batch-shuffle orders, and allocator fragmentation is
-    # order-sensitive.
+    # Trainer가 DataLoader를 만들기 직전에 시드를 다시 설정한다: 모델/adapter
+    # 초기화가 전역 RNG를 소비하는 양이 방식마다 다르고(LoRA는 Kaiming-uniform으로
+    # adapter를 뽑지만 full_ft는 그렇지 않음), Trainer의 기본 RandomSampler는
+    # 설정된 시드가 아니라 torch의 *현재* 전역 RNG 상태로 스스로 시드를 정한다
+    # -- 따라서 이 재설정이 없으면 full_ft와 lora가 서로 다른, 통제되지 않은
+    # 배치 셔플 순서를 갖게 되고, allocator 파편화는 순서에 민감하다.
     set_seed(cfg["seed"])
     trainer = Trainer(
         model=model,
@@ -148,7 +147,7 @@ def main():
         callbacks=[JsonlLoggingCallback(os.path.join(out_dir, "train_log.jsonl"))],
     )
 
-    # Resume handling.
+    # 재개(resume) 처리.
     resume = None
     last_ckpt = get_last_checkpoint(out_dir) if os.path.isdir(out_dir) else None
     if last_ckpt and not args.fresh:
@@ -160,7 +159,7 @@ def main():
     train_result = trainer.train(resume_from_checkpoint=resume)
     logger.info("Training finished | metrics=%s", train_result.metrics)
 
-    # Save final model / adapter to a stable path for evaluate.py.
+    # evaluate.py가 참조할 고정된 경로에 최종 모델/adapter를 저장.
     if method == "lora":
         adapter_dir = os.path.join(out_dir, "adapter")
         model.save_pretrained(adapter_dir)

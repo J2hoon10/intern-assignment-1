@@ -1,9 +1,9 @@
-"""Evaluate a model on the official PubMedQA test set (500 instances).
+"""공식 PubMedQA test 셋(500개)으로 모델을 평가한다.
 
-Metrics (Accuracy & Macro-F1 + per-class F1 + confusion matrix) are written to
-logs and JSON only — no charts. Also writes predictions.json in the official
-PubMedQA format (pubid -> label) for cross-checking with the repo's evaluation.py,
-and refreshes outputs/summary.{txt,json} comparing the three experiments.
+지표(Accuracy & Macro-F1 + 클래스별 F1 + confusion matrix)는 로그와 JSON으로만
+기록한다 — 차트 없음. 공식 PubMedQA evaluation.py와 교차 검증할 수 있도록
+공식 포맷(pubid -> label)으로 predictions.json도 작성하고, 세 실험을 비교하는
+outputs/summary.{txt,json}도 갱신한다.
 """
 import argparse
 import glob
@@ -50,14 +50,14 @@ def verify_test_set(rows, logger):
 
 
 def find_param_count(exp_dir):
-    """Locate param_count.json for an experiment.
+    """실험의 param_count.json 위치를 찾는다.
 
-    train.py (single-stage) writes it directly to outputs/<exp>/param_count.json.
-    train_multiphase.py writes one per unit instead (outputs/<exp>/phase1/,
-    outputs/<exp>/phase2/fold{k}/, ...) and never aggregates one at the root.
-    Prefer the unit that produced the deployed adapter (phase2's best fold, per
-    cv_selection.json); otherwise fall back to any unit's file -- trainable/total
-    are identical across units for a fixed LoRA config (same target_modules/r).
+    train.py(단일 단계)는 outputs/<exp>/param_count.json에 직접 기록한다.
+    train_multiphase.py는 대신 유닛별로 하나씩 기록하고(outputs/<exp>/phase1/,
+    outputs/<exp>/phase2/fold{k}/, ...) 루트에 취합본을 만들지 않는다.
+    배포된 adapter를 만든 유닛(cv_selection.json 기준 phase2의 best fold)을
+    우선시하고, 없으면 아무 유닛의 파일이나 사용한다 -- 동일한 LoRA config
+    (같은 target_modules/r)라면 유닛 간 trainable/total 값은 동일하다.
     """
     top = os.path.join(exp_dir, "param_count.json")
     if os.path.isfile(top):
@@ -74,7 +74,7 @@ def find_param_count(exp_dir):
 
 
 def write_summary(logger):
-    """Aggregate metrics.json + param_count.json across experiments into a text table."""
+    """실험들의 metrics.json + param_count.json을 모아 텍스트 테이블로 만든다."""
     rows = []
     for exp in EXPERIMENTS:
         d = os.path.join(OUTPUTS_DIR, exp)

@@ -1,9 +1,9 @@
-"""Constrained scoring for yes/no/maybe and classification metrics.
+"""yes/no/maybe 제약 스코어링(constrained scoring) 및 분류 지표.
 
-For each prompt we compute the length-normalized log-probability that the model
-assigns to each candidate answer (" yes" / " no" / " maybe") as a continuation,
-then predict the arg-max candidate. This works for the untrained base model
-(true zero-shot) as well as fine-tuned models, and needs no free-form parsing.
+각 프롬프트에 대해, 모델이 후속 텍스트로 각 후보 답("yes" / "no" / "maybe")에
+부여하는 길이정규화 로그확률을 계산한 뒤 arg-max 후보를 예측값으로 삼는다. 이
+방식은 학습되지 않은 base 모델(순수 zero-shot)뿐 아니라 fine-tuned 모델에도
+그대로 적용되며, 자유 형식 텍스트 파싱이 필요 없다.
 """
 from typing import List
 
@@ -22,17 +22,16 @@ from data import LABELS
 @torch.no_grad()
 def predict(model, tokenizer, prompts: List[str], max_seq_len: int = 1024,
             batch_size: int = 16, device=None, return_scores: bool = False):
-    """Return the predicted label (yes/no/maybe) for each prompt.
+    """각 프롬프트에 대한 예측 라벨(yes/no/maybe)을 반환한다.
 
-    If ``return_scores`` is True, also return an [N, 3] array of length-normalized
-    log-probabilities per candidate (column order = LABELS), used for pseudo-label
-    confidence filtering.
+    ``return_scores``가 True이면, 후보별 길이정규화 로그확률로 이루어진 [N, 3]
+    배열도 함께 반환한다(열 순서 = LABELS). pseudo-label 신뢰도 필터링에 쓰인다.
     """
     model.eval()
     if device is None:
         device = next(model.parameters()).device
 
-    # Pre-tokenize the candidate continuations once.
+    # 후보 continuation들을 미리 한 번만 토큰화해 둔다.
     cand_ids = [tokenizer(" " + lab, add_special_tokens=False)["input_ids"] for lab in LABELS]
     pad_id = tokenizer.pad_token_id
 
@@ -67,10 +66,10 @@ def predict(model, tokenizer, prompts: List[str], max_seq_len: int = 1024,
                 total = 0.0
                 real_len = len(s)
                 for k in range(clen):
-                    pos = real_len - clen + k          # position of candidate token
+                    pos = real_len - clen + k          # 후보 토큰의 위치
                     tok_id = s[pos]
-                    total += logprobs[i, pos - 1, tok_id].item()   # predicted from pos-1
-                scores[i, ci] = total / clen           # length-normalized
+                    total += logprobs[i, pos - 1, tok_id].item()   # pos-1에서 예측된 값
+                scores[i, ci] = total / clen           # 길이정규화
         for i in range(len(batch_prompts)):
             preds.append(LABELS[int(np.argmax(scores[i]))])
         if return_scores:

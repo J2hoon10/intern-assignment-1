@@ -1,25 +1,26 @@
-"""Two-phase sequential fine-tuning with 10-fold CV on PQA-L.
+"""PQA-L 10-fold CV를 포함한 2단계 순차 fine-tuning.
 
-Phase 1: train on PQA-A (once).
-Phase 2: 10-fold cross-validation on PQA-L. For each fold, continue training from
-         the Phase-1 weights on 450 examples and validate on the held-out 50. The
-         fold with the best validation Macro-F1 is selected; its model/adapter is
-         copied to outputs/<exp>/{final|adapter} so evaluate.py tests the best model.
+Phase 1: PQA-A로 학습 (한 번).
+Phase 2: PQA-L에 대한 10-fold 교차검증. 각 fold마다 Phase-1 가중치에서 이어받아
+         450개 예시로 학습하고, 남겨둔 50개로 검증한다. 검증 Macro-F1이 가장 좋은
+         fold를 선택하고, 그 모델/adapter를 outputs/<exp>/{final|adapter}로
+         복사하여 evaluate.py가 그 최고 모델을 테스트하게 한다.
 
-Weight initialization across phases:
-  - full_ft: load the previous phase's full model
-  - lora:    continue training the SAME adapter (is_trainable=True)
+단계 간 가중치 초기화 방식:
+  - full_ft: 이전 단계의 전체 모델을 로드
+  - lora:    동일한 adapter를 계속 학습 (is_trainable=True)
 
-*** Memory isolation ***: each training unit (Phase 1, and every CV fold) runs in a
-FRESH SUBPROCESS. Instantiating transformers.Trainer many times in one process leaks
-GPU memory (optimizer state / accelerate singletons are not fully released), which
-accumulates and eventually OOMs. Running each unit as its own process guarantees the
-GPU is fully freed between units. The parent process does NO GPU work.
+*** 메모리 격리 ***: 각 학습 유닛(Phase 1, 그리고 각 CV fold)은 새로운
+서브프로세스에서 실행된다. 한 프로세스 안에서 transformers.Trainer를 여러 번
+생성하면 GPU 메모리가 샌다(옵티마이저 상태 / accelerate 싱글턴이 완전히
+해제되지 않음). 이게 누적되면 결국 OOM이 난다. 각 유닛을 독립된 프로세스로
+실행하면 유닛 사이에서 GPU가 완전히 해제됨이 보장된다. 부모 프로세스는 GPU
+작업을 전혀 하지 않는다.
 
-Resume-safe: completed phases/folds are skipped (a fold is "done" once its
-val_metrics.json exists); interrupted training auto-resumes from the latest
-checkpoint. Non-best full_ft fold weights are deleted after selection to save disk.
-Reuses build_training_args / JsonlLoggingCallback from train.py.
+재개 가능(resume-safe): 완료된 phase/fold는 건너뛴다(val_metrics.json이 있으면
+그 fold는 "완료"된 것으로 간주). 중단된 학습은 최신 체크포인트에서 자동 재개된다.
+최고 fold가 아닌 full_ft fold의 가중치는 선택 이후 디스크 절약을 위해 삭제된다.
+train.py의 build_training_args / JsonlLoggingCallback을 재사용한다.
 """
 import argparse
 import gc
@@ -70,30 +71,31 @@ def _free_cuda():
 
 
 class CudaMemoryProbeCallback(TrainerCallback):
-    """Diagnostic: checks memory_reserved() after EVERY optimizer step and logs a
-    line only when it changed, together with the padded batch shapes the collator
-    produced during that step and which of them were first-seen. If the allocator
-    behaves as intended (group_by_length + pad_to_multiple_of=64), reserved should
-    grow only on first-seen shapes early in the run and then go silent. Also logs
-    reserved/allocated every `every_n_steps` steps with the cumulative distinct-
-    shape count, and calls empty_cache() once per epoch to check whether the
-    Windows sysmem (Shared GPU Memory) fallback actually shrinks once the cache
-    is released. (The full torch.cuda.memory_summary() dump at the first periodic
-    probe is disabled -- the one-line probes carry the same signal.)"""
+    """진단용: 매 옵티마이저 스텝마다 memory_reserved()를 확인하고, 값이 바뀌었을
+    때만 그 스텝에서 collator가 만든 패딩 배치 shape들과 그중 처음 본 것이
+    무엇인지와 함께 한 줄 로그를 남긴다. allocator가 의도대로 동작한다면
+    (group_by_length + pad_to_multiple_of=64), reserved는 실행 초반 처음 보는
+    shape에서만 늘어나고 그 이후로는 조용해져야 한다. 또한 `every_n_steps`마다
+    누적 distinct-shape 개수와 함께 reserved/allocated를 로깅하고, 에폭마다 한 번
+    empty_cache()를 호출해서 캐시를 해제했을 때 Windows sysmem(Shared GPU
+    Memory) 폴백이 실제로 줄어드는지 확인한다. (첫 주기적 probe에서의 전체
+    torch.cuda.memory_summary() 덤프는 비활성화했다 -- 한 줄짜리 probe로도
+    같은 정보를 알 수 있다.)"""
 
     def __init__(self, logger, every_n_steps: int = 10, collator=None,
                  empty_cache_every_steps: int = 0, empty_cache_min_reserved_gb: float = 12.0):
         self.logger = logger
         self.every_n_steps = every_n_steps
         self.collator = collator
-        # empty_cache_every_steps > 0: every N optimizer steps, release cached
-        # allocator segments back to the driver -- but only while reserved is
-        # above empty_cache_min_reserved_gb. Reserved that stays under the VRAM
-        # ceiling is harmless cache; releasing it would just cost re-cudaMalloc.
-        # This exists because garbage_collection_threshold in
-        # PYTORCH_CUDA_ALLOC_CONF is a no-op unless the process also calls
-        # set_per_process_memory_fraction (allocator gates GC on set_fraction),
-        # so nothing else ever returns memory mid-epoch.
+        # empty_cache_every_steps > 0: N 옵티마이저 스텝마다 캐시된 allocator
+        # 세그먼트를 드라이버로 반환한다 -- 단, reserved가
+        # empty_cache_min_reserved_gb를 넘을 때만. VRAM 상한 아래에 머무는
+        # reserved는 무해한 캐시이므로, 그걸 해제하면 재-cudaMalloc 비용만 든다.
+        # 이게 필요한 이유는 PYTORCH_CUDA_ALLOC_CONF의
+        # garbage_collection_threshold가 프로세스가
+        # set_per_process_memory_fraction도 호출하지 않는 한 아무 동작도 하지
+        # 않기 때문이다(allocator는 GC를 set_fraction에 게이팅함). 그래서 이거
+        # 말고는 에폭 도중에 메모리를 반환하는 방법이 없다.
         self.empty_cache_every_steps = empty_cache_every_steps
         self.empty_cache_min_reserved_gb = empty_cache_min_reserved_gb
         self._prev_reserved = None
@@ -130,7 +132,7 @@ class CudaMemoryProbeCallback(TrainerCallback):
         self._prev_reserved = reserved
         if state.global_step % self.every_n_steps != 0:
             return
-        # Full allocator table dump, disabled on request (huge and repetitive):
+        # 전체 allocator 테이블 덤프는 요청에 따라 비활성화(너무 크고 반복적임):
         # self.logger.info("=== torch.cuda.memory_summary() (step=%d) ===\n%s",
         #                   state.global_step, torch.cuda.memory_summary())
         self.logger.info("[mem-probe] step=%d reserved=%.2fGB allocated=%.2fGB distinct_shapes=%d",
@@ -148,7 +150,7 @@ class CudaMemoryProbeCallback(TrainerCallback):
 
 
 # ---------------------------------------------------------------------------
-# Child-process work (one training unit): runs in its own process, then exits.
+# 자식 프로세스 작업(학습 유닛 하나): 자신의 프로세스에서 실행 후 종료된다.
 # ---------------------------------------------------------------------------
 def load_phase_model(method, model_name, lora_cfg, init_from, logger):
     if method == "full_ft":
@@ -183,12 +185,12 @@ def train_one_phase(method, model_name, max_seq_len, seed, lora_cfg,
 
     collator = CausalCollator(tokenizer)
     training_args = build_training_args({"train": phase_train, "seed": seed}, out_dir, logger)
-    # Re-seed right before the Trainer builds its DataLoader: model/adapter init
-    # (LoRA's 168 Kaiming-uniform draws) consumes the global RNG by a different
-    # amount than full_ft, so without this reset, Trainer's plain RandomSampler
-    # (which seeds itself from torch's *current* global RNG state, not the
-    # configured seed) would hand full_ft and lora different, uncontrolled
-    # batch-shuffle orders -- and allocator fragmentation is order-sensitive.
+    # Trainer가 DataLoader를 만들기 직전에 시드를 다시 설정한다: 모델/adapter
+    # 초기화(LoRA의 168개 Kaiming-uniform 추출)가 소비하는 전역 RNG 양이
+    # full_ft와 다르므로, 이 재설정이 없으면 Trainer의 기본 RandomSampler(설정된
+    # 시드가 아니라 torch의 *현재* 전역 RNG 상태로 스스로 시드를 정함)가
+    # full_ft와 lora에 서로 다른, 통제되지 않은 배치 셔플 순서를 주게 된다 --
+    # 그리고 allocator 파편화는 순서에 민감하다.
     set_seed(seed)
     trainer = Trainer(
         model=model,
@@ -207,8 +209,8 @@ def train_one_phase(method, model_name, max_seq_len, seed, lora_cfg,
     if last_ckpt:
         logger.info("Resuming from checkpoint: %s", last_ckpt)
     trainer.train(resume_from_checkpoint=last_ckpt)
-    # End-of-unit allocator table dump, disabled on request (same table as the
-    # step probe; the per-step [mem-probe] lines carry the signal):
+    # 유닛 종료 시 allocator 테이블 덤프는 요청에 따라 비활성화(step probe와 같은
+    # 테이블이며, 스텝별 [mem-probe] 로그로 같은 정보를 알 수 있음):
     # if torch.cuda.is_available():
     #     logger.info("=== torch.cuda.memory_summary() ===\n%s", torch.cuda.memory_summary())
 
@@ -242,12 +244,12 @@ def eval_model_on(method, model_name, art_dir, rows, max_seq_len, batch_size, lo
 
 
 def run_unit(spec_path):
-    """Child entry point: train (and, for folds, evaluate) one unit, then exit.
+    """자식 프로세스 진입점: 유닛 하나를 학습하고(fold라면 평가까지) 종료한다.
 
-    Each unit runs in a fresh subprocess (see module docstring), so the parent's
-    set_seed() never reaches it -- without this call the child's RNG (and thus
-    its DataLoader shuffle order) was seeded from OS entropy, not spec["seed"],
-    making every run non-reproducible regardless of the configured seed.
+    각 유닛은 새 서브프로세스에서 실행되므로(모듈 docstring 참고), 부모의
+    set_seed()는 여기까지 전달되지 않는다 -- 이 호출이 없으면 자식의 RNG(따라서
+    DataLoader 셔플 순서)가 spec["seed"]가 아니라 OS 엔트로피로 시드되어, 설정된
+    시드와 무관하게 매 실행이 재현 불가능해진다.
     """
     with open(spec_path, encoding="utf-8") as f:
         spec = json.load(f)
@@ -267,17 +269,17 @@ def run_unit(spec_path):
 
 
 # ---------------------------------------------------------------------------
-# Parent-process orchestration (no GPU work here).
+# 부모 프로세스 오케스트레이션 (여기서는 GPU 작업을 하지 않는다).
 # ---------------------------------------------------------------------------
 def _launch_unit(spec, logger):
-    """Run one training unit in a fresh subprocess (GPU fully freed on exit).
+    """학습 유닛 하나를 새 서브프로세스에서 실행한다(종료 시 GPU가 완전히 해제됨).
 
-    Sets max_split_size_mb to reduce CUDA allocator fragmentation, which otherwise
-    causes an OOM mid-training even when total free memory would suffice.
-    garbage_collection_threshold frees cached blocks before reserved memory reaches
-    the VRAM ceiling; hitting it triggers the Windows driver's silent sysmem
-    fallback, which slows training several-fold instead of raising an OOM.
-    (expandable_segments is unsupported on Windows.)
+    max_split_size_mb를 설정해 CUDA allocator 파편화를 줄인다. 파편화가 있으면
+    전체 여유 메모리가 충분해도 학습 도중 OOM이 날 수 있다.
+    garbage_collection_threshold는 reserved 메모리가 VRAM 상한에 도달하기 전에
+    캐시된 블록을 해제한다; 상한에 도달하면 Windows 드라이버의 조용한 sysmem
+    폴백이 발동해서 OOM을 내는 대신 학습이 몇 배로 느려진다.
+    (expandable_segments는 Windows에서 지원되지 않는다.)
     """
     os.makedirs(spec["out_dir"], exist_ok=True)
     spec_path = os.path.join(spec["out_dir"], "_unit_spec.json")
@@ -361,7 +363,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--config")
     ap.add_argument("--force", action="store_true", help="retrain even completed phases/folds")
-    ap.add_argument("--_unit", help=argparse.SUPPRESS)   # internal: run one unit in a subprocess
+    ap.add_argument("--_unit", help=argparse.SUPPRESS)   # 내부용: 서브프로세스에서 유닛 하나 실행
     args = ap.parse_args()
 
     if args._unit:

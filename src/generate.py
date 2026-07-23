@@ -1,12 +1,12 @@
-"""Free-form generation: run a trained model with real autoregressive decoding
-(model.generate) and print whatever text it actually produces.
+"""자유 형식 생성: 실제 autoregressive 디코딩(model.generate)으로 학습된
+모델을 돌려서, 모델이 실제로 생성하는 텍스트를 그대로 출력한다.
 
-Unlike evaluate.py / infer.py / metrics.predict (which score fixed " yes"/" no"/
-" maybe" continuations via teacher forcing and never sample), this script does not
-constrain the output to any label set. It's for looking at what the model actually
-says when left alone.
+고정된 " yes"/" no"/" maybe" continuation을 teacher forcing으로 채점만 하고
+샘플링은 하지 않는 evaluate.py / infer.py / metrics.predict와 달리, 이
+스크립트는 출력을 어떤 라벨 집합으로도 제약하지 않는다. 모델을 그대로 두었을
+때 실제로 뭐라고 답하는지 보기 위한 것이다.
 
-Usage:
+사용법:
     python src/generate.py --config configs/lora.yaml
     python src/generate.py --config configs/lora.yaml --input data/infer_sample.jsonl
     python src/generate.py --config configs/lora.yaml --sample --temperature 0.7 --top_p 0.9
@@ -52,7 +52,7 @@ def main():
     model = load_eval_model(cfg, logger)
     model.eval()
     tokenizer = load_tokenizer(cfg["model_name"])
-    tokenizer.padding_side = "left"  # required for correct batched causal generation
+    tokenizer.padding_side = "left"  # 배치 causal generation이 올바르게 동작하려면 필요
 
     device = next(model.parameters()).device
     results = []
